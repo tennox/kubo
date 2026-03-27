@@ -10,17 +10,26 @@ Local-first/offline-first application node that:
 
 ## Configuration Rationale
 
-### Routing: Isolated DHT Client
+### Routing: Hybrid with Peer-First Lookup
 ```bash
-ipfs config --json Routing.Type '"dhtclient"'
+ipfs config --json Routing.Type '"autoclient"'
 ipfs config --json Bootstrap '[]'
+ipfs config --json Routing.DelegatedRouters '["https://delegated-ipfs.dev"]'
 ```
 
-**Why dhtclient:**
-- Needs local DHT datastore for `routing/put` (store IPNS records)
+**Why autoclient with delegated fallback:**
+- Needs local DHT datastore for `routing/put` (store IPNS records) — autoclient includes DHT client
 - Isolated from public DHT (empty bootstrap)
-- Can query peer network for content lookups
-- Minimal server overhead (no incoming DHT queries)
+- **Parallel routing**: DHT and delegated routers queried simultaneously
+- **In practice**: Local peer (server) responds faster than HTTP, so peer-first lookup
+- Delegated routing provides fallback when content not on peer network
+- Hybrid approach balances simplicity with fallback reliability
+
+**Alternative: Custom sequential routing**
+- If you want guaranteed sequential (try peer first, only then delegated)
+- Requires complex routing config
+- More efficient (avoids parallel queries)
+- See research/autoclient-vs-custom-routing.md for details
 
 ### IPNS Synchronization
 ```bash
@@ -186,9 +195,10 @@ When storing IPNS records while offline via `routing/put`:
 ## Complete Laptop Config
 
 ```bash
-# Routing & Bootstrap
-ipfs config --json Routing.Type '"dhtclient"'
+# Routing & Bootstrap - Hybrid with delegated fallback
+ipfs config --json Routing.Type '"autoclient"'
 ipfs config --json Bootstrap '[]'
+ipfs config --json Routing.DelegatedRouters '["https://delegated-ipfs.dev"]'
 
 # IPNS
 ipfs config --json Ipns.UsePubsub true
@@ -210,12 +220,13 @@ ipfs config --json Swarm.ConnMgr.GracePeriod '"30s"'
 # Gateway
 ipfs config --json Gateway.NoFetch false
 
+# Relay for NAT traversal
+ipfs config --json Swarm.RelayClient.Enabled true
+ipfs config --json Swarm.RelayService.Enabled false
+
 # Maintenance
 ipfs config --json Datastore.GCPeriod '"24h"'
 
-# Other settings (same as server)
+# DNS
 ipfs config --json DNS.Resolvers '{".": "https://cloudflare-dns.com/dns-query"}'
-ipfs config --json Discovery.MDNS.Enabled false  # Remove this if using MDNS
-ipfs config --json Swarm.RelayClient.Enabled true
-ipfs config --json Swarm.RelayService.Enabled false
 ```
