@@ -78,6 +78,29 @@ ipfs config --json Swarm.RelayService.Enabled false
 - RelayService disabled: don't relay for other peers (save resources)
 - Minimal overhead in small peer network
 
+### Delegated Routing: Fallback for Content Discovery
+```bash
+# Default: uses cid.contact (provider lookup only)
+# For IPNS support, optionally use:
+ipfs config --json Routing.DelegatedRouters '["https://delegated-ipfs.dev"]'
+```
+
+**Why:**
+- Provides fallback when content not found on peer network
+- `cid.contact` is default, finds CID providers only
+- `delegated-ipfs.dev` adds IPNS lookup support
+- **Does NOT compromise isolation**: HTTP-only, peers from responses don't enter DHT
+- **Safe**: `Bootstrap: []` prevents DHT exposure regardless
+
+**How it works:**
+1. Laptop queries server peer first (fastest)
+2. If not found, queries delegated routing service
+3. Delegated service returns peer list
+4. Laptop fetches blocks from those peers directly
+5. No DHT peer discovery occurs
+
+**Important:** Delegated routing is optional and only used if content not found locally or on peers. With good peer coverage (server + LAN devices), won't be needed often.
+
 ### Peer Connection Management
 ```bash
 ipfs config --json Swarm.ConnMgr.Type '"basic"'
@@ -114,14 +137,51 @@ ipfs config --json Datastore.GCPeriod '"24h"'
 
 Server doesn't announce (it's authoritative storage). Laptop announces so peers can find cached blocks.
 
+## Content Lookup Workflow
+
+When laptop needs to find content (CID or IPNS):
+
+### Default Behavior (Peer Network First)
+1. **Query server peer** via DHT (fastest, no internet needed)
+   - `ipfs routing get /ipns/k51...`
+   - Works even offline if server is nearby
+2. **MDNS-discovered LAN peers** (if available)
+   - Auto-discovered, shares content via Bitswap
+3. **PubSub cache** (if peers are connected)
+   - IPNS updates via PubSub keep records fresh
+4. **Cache TTL** fallback (1h)
+   - If PubSub fails, stale record eventually refreshes
+
+### Fallback to Public Routers (Optional)
+If content not found on peers:
+1. Delegated routing service (if configured)
+   - Default: `cid.contact` (CID providers only)
+   - Optional: `delegated-ipfs.dev` (adds IPNS support)
+2. Service returns peer list with content
+3. Laptop fetches blocks from returned peers
+
+**Example sequence when offline from server but online to internet:**
+```
+Need CID → Query server (fails, offline) → Query delegated router → Get peers → Fetch blocks
+Need IPNS → Query server (fails) → Query delegated router → Get IPNS record → Cache it
+```
+
+### Important: No DHT Exposure
+- Delegated routing returns peers, but they're NOT added to DHT routing table
+- Only your server is in DHT routing table (no bootstrap peers)
+- No public DHT connection occurs, regardless of delegated routing use
+
 ## Known Limitation: Offline IPNS Updates
 
 When storing IPNS records while offline via `routing/put`:
 - Records saved to local datastore
 - Not announced to peers on reconnect (PubSub wasn't running)
-- Peers won't know about update until explicitly queried
+- Peers won't know about update until explicitly queried via DHT
 
-**Current workaround:** Accept limitation, or use `ipfs name publish` if laptop has private keys to manage.
+**Workarounds:**
+1. **Explicit DHT sync** — After reconnecting: `ipfs routing get /ipns/k51...` to check peers
+2. **Use `ipfs name publish`** — If laptop has private keys to manage own IPNS names
+3. **Accept limitation** — Offline updates sync when peer is queried for the record
 
 ## Complete Laptop Config
 
