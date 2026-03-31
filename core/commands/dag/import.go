@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 
+	bserv "github.com/ipfs/boxo/blockservice"
+	offline "github.com/ipfs/boxo/exchange/offline"
 	"github.com/ipfs/boxo/files"
+	"github.com/ipfs/boxo/ipld/merkledag"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	cmds "github.com/ipfs/go-ipfs-cmds"
@@ -164,15 +167,24 @@ func dagImport(req *cmds.Request, res cmds.ResponseEmitter, env cmds.Environment
 
 	// opportunistic pinning: try whatever sticks
 	if doPinRoots {
+		// Use an offline DAG service for pre-verification to ensure we never
+		// reach out to the network (e.g. Bitswap) when checking DAG completeness.
+		// Without this, node.Pinning.Pin() would use the node's online DAG service
+		// internally (via FetchGraph), potentially hanging indefinitely if blocks
+		// are missing and the node is connected to peers.
+		offlineDAG := merkledag.NewDAGService(bserv.New(node.Blockstore, offline.Exchange(node.Blockstore)))
+
 		err = roots.ForEach(func(c cid.Cid) error {
 			ret := RootMeta{Cid: c}
 
-			// This will trigger a full read of the DAG in the pinner, to make sure we have all blocks.
-			// Ideally we would do colloring of the pinning state while importing the blocks
-			// and ensure the gray bucket is empty at the end (or use the network to download missing blocks).
 			if block, err := node.Blockstore.Get(req.Context, c); err != nil {
 				ret.PinErrorMsg = err.Error()
 			} else if nd, err := blockDecoder.DecodeNode(req.Context, block); err != nil {
+				ret.PinErrorMsg = err.Error()
+			} else if err := merkledag.FetchGraph(req.Context, c, offlineDAG); err != nil {
+				// Pre-verify the DAG is complete using an offline DAG service.
+				// This fails fast if any block is missing, instead of hanging
+				// on Bitswap trying to retrieve it from the network.
 				ret.PinErrorMsg = err.Error()
 			} else if err := node.Pinning.Pin(req.Context, nd, true, ""); err != nil {
 				ret.PinErrorMsg = err.Error()
