@@ -110,6 +110,7 @@ ipfs config --json Routing.DelegatedRouters '["https://delegated-ipfs.dev"]'
 
 **Important:** Delegated routing is optional and only used if content not found locally or on peers. With good peer coverage (server + LAN devices), won't be needed often.
 
+
 ### Peer Connection Management
 ```bash
 ipfs config --json Swarm.ConnMgr.Type '"basic"'
@@ -179,6 +180,7 @@ Need IPNS → Query server (fails) → Query delegated router → Get IPNS recor
 - Delegated routing returns peers, but they're NOT added to DHT routing table
 - Only your server is in DHT routing table (no bootstrap peers)
 - No public DHT connection occurs, regardless of delegated routing use
+
 
 ## Known Limitation: Offline IPNS Updates
 
